@@ -740,10 +740,6 @@ export class View {
       return {session: this.getSession(), static: this.getStatic()}
     })
 
-    this.uploadChannel = this.liveSocket.channel(`lvu:${this.id}`, () => {
-      return {session: this.getSession()}
-    })
-
     this.loaderTimer = setTimeout(() => this.showLoader(), LOADER_TIMEOUT)
     this.bindChannel()
   }
@@ -842,8 +838,6 @@ export class View {
       .receive("ok", data => this.onJoin(data))
       .receive("error", resp => this.onJoinError(resp))
       .receive("timeout", () => this.onJoinError("timeout"))
-
-    this.uploadChannel.join()
   }
 
   onJoinError(resp){
@@ -901,16 +895,26 @@ export class View {
   }
 
   pushFormSubmit(formEl, phxEvent, onReply){
+    this.uploadCount = 0;
     let files = gatherFiles(formEl)
     if (Object.keys(files).length > 0) {
-      uploadFiles(files, this.uploadChannel, ({ file_ref }) => {
-        this.pushWithReply("event", {
-          type: "form",
-          upload_channel: this.uploadChannel.topic,
-          file_ref,
-          event: phxEvent,
-          value: serializeForm(formEl)
-        }, onReply)
+      this.channel.push("get_upload_ref").receive("ok", ({ ref }) => {
+        const uploadChannel = this.liveSocket.channel(`lvu:${this.id}${this.uploadCount++}`, () => {
+          return {session: this.getSession(), ref: ref}
+        })
+
+        uploadChannel.join().receive("ok", () => {
+          // start upload
+          uploadFiles(files, uploadChannel, ({ file_ref }) => {
+            this.pushWithReply("event", {
+              type: "form",
+              upload_channel: uploadChannel.topic,
+              file_ref,
+              event: phxEvent,
+              value: serializeForm(formEl)
+            }, onReply)
+          })
+      });
       });
       // lock form
       // upload files
